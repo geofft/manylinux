@@ -14,6 +14,12 @@
 #include <string.h>
 #include <unistd.h>
 
+#ifdef DEBUG
+#define debug_printf printf
+#else
+#define debug_printf(...) 0
+#endif
+
 const unsigned long VSYS_gettimeofday = 0xffffffffff600000,
                     VSYS_time = 0xffffffffff600400,
                     VSYS_getcpu = 0xffffffffff600800;
@@ -41,10 +47,10 @@ int handle_vsyscall(pid_t pid) {
 	struct user_regs_struct regs;
 	ptrace(PTRACE_GETREGS, pid, 0, &regs);
 	if ((regs.rip & 0xfffffffffffff0ff) == 0xffffffffff600000) {
-		printf("handling vsyscall for %d\n", pid);
+		debug_printf("handling vsyscall for %d\n", pid);
 		unsigned long vdso = vdso_address(pid);
 		if (vdso_address == 0) {
-			printf("couldn't find vdso\n");
+			debug_printf("couldn't find vdso\n");
 			return 0;
 		}
 
@@ -55,7 +61,7 @@ int handle_vsyscall(pid_t pid) {
 		} else if (regs.rip == VSYS_getcpu) {
 			regs.rip = vdso | VDSO_getcpu;
 		} else {
-			printf("invalid vsyscall %x\n", regs.rip);
+			debug_printf("invalid vsyscall %x\n", regs.rip);
 			return 0;
 		}
 		ptrace(PTRACE_SETREGS, pid, 0, &regs);
