@@ -6,9 +6,12 @@
 #include <sys/wait.h>
 #include <sys/user.h>
 #include <dlfcn.h>
+#include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 
 const unsigned long VSYS_gettimeofday = 0xffffffffff600000,
@@ -44,7 +47,7 @@ int handle_vsyscall(pid_t pid) {
 			printf("couldn't find vdso\n");
 			return 0;
 		}
-			
+
 		if (regs.rip == VSYS_gettimeofday) {
 			regs.rip = vdso | VDSO_gettimeofday;
 		} else if (regs.rip == VSYS_time) {
@@ -66,17 +69,43 @@ int main(int argc, char *argv[]) {
 	VDSO_gettimeofday = (unsigned long)dlsym(vdso, "__vdso_gettimeofday") & 0xfff;
 	VDSO_time = (unsigned long)dlsym(vdso, "__vdso_time") & 0xfff;
 	VDSO_getcpu = (unsigned long)dlsym(vdso, "__vdso_getcpu") & 0xfff;
+	pid_t pid, child_pid = 0;
+	int wstatus, child_wstatus = 0;
 
 	if (argc < 2) {
-		printf("usage: vsyscall_trace <pid>");
+		printf("usage: vsyscall_trace -p <pid>...\n");
+		printf("       vsyscall_trace <cmd> [args...]\n");
 		return 1;
 	}
-	pid_t pid = atoi(argv[1]);
-	if (ptrace(PTRACE_SEIZE, pid, 0, PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK | PTRACE_O_TRACECLONE) != 0) {
-		perror("PTRACE_SEIZE");
-		return 1;
+
+	if (strcmp(argv[1], "-p") == 0) {
+		int i;
+		for (i = 2; i < argc; i++) {
+			pid = atoi(argv[i]);
+			if (ptrace(PTRACE_SEIZE, pid, 0, PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK | PTRACE_O_TRACECLONE) != 0) {
+				perror("PTRACE_SEIZE");
+				return 1;
+			}
+		}
+	} else {
+		child_pid = fork();
+		if (child_pid == -1) {
+			perror("fork");
+			return 1;
+		} else if (child_pid == 0) {
+			raise(SIGSTOP);
+			execvp(argv[1], &argv[1]);
+			perror("execvp");
+			return 1;
+		} else {
+			if (ptrace(PTRACE_SEIZE, child_pid, 0, PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK | PTRACE_O_TRACECLONE) != 0) {
+				perror("PTRACE_SEIZE");
+				return 1;
+			}
+			kill(child_pid, SIGCONT);
+		}
 	}
-	int wstatus;
+
 	while ((pid = waitpid(-1, &wstatus, 0)) != -1) {
 		if (WIFSTOPPED(wstatus)) {
 			if (WSTOPSIG(wstatus) == SIGSEGV && handle_vsyscall(pid)) {
@@ -84,6 +113,18 @@ int main(int argc, char *argv[]) {
 			} else {
 				ptrace(PTRACE_CONT, pid, 0, WSTOPSIG(wstatus));
 			}
+		} else if (pid == child_pid && WIFEXITED(wstatus)) {
+			child_wstatus = wstatus;
 		}
+	}
+	if (errno != ECHILD) {
+		perror("waitpid");
+		return 1;
+	}
+	if (WIFSIGNALED(wstatus)) {
+		raise(WTERMSIG(wstatus));
+		return 1;
+	} else {
+		return WEXITSTATUS(wstatus);
 	}
 }
