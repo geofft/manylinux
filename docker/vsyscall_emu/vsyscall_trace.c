@@ -95,7 +95,7 @@ int main(int argc, char *argv[]) {
 			perror("fork");
 			return 1;
 		} else if (child_pid == 0) {
-			char x = *(volatile char *)0xffffffffff600000;
+			((time_t (*)(time_t *))VSYS_time)(NULL);
 			return 0;
 		} else {
 			waitpid(child_pid, &wstatus, 0);
