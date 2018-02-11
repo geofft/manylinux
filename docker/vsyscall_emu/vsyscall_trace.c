@@ -71,10 +71,6 @@ int handle_vsyscall(pid_t pid) {
 }
 
 int main(int argc, char *argv[]) {
-	void *vdso = dlopen("linux-vdso.so.1", RTLD_LAZY | RTLD_NOLOAD);
-	VDSO_gettimeofday = (unsigned long)dlsym(vdso, "__vdso_gettimeofday") & 0xfff;
-	VDSO_time = (unsigned long)dlsym(vdso, "__vdso_time") & 0xfff;
-	VDSO_getcpu = (unsigned long)dlsym(vdso, "__vdso_getcpu") & 0xfff;
 	pid_t pid, child_pid = 0;
 	int wstatus, child_wstatus = 0;
 
@@ -99,6 +95,23 @@ int main(int argc, char *argv[]) {
 			perror("fork");
 			return 1;
 		} else if (child_pid == 0) {
+			char x = *(volatile char *)0xffffffffff600000;
+			return 0;
+		} else {
+			waitpid(child_pid, &wstatus, 0);
+			if (WIFEXITED(wstatus)) {
+				/* vsyscall page exists, get out of the way */
+				execvp(argv[1], &argv[1]);
+				perror("execvp");
+				return 1;
+			}
+		}
+
+		child_pid = fork();
+		if (child_pid == -1) {
+			perror("fork");
+			return 1;
+		} else if (child_pid == 0) {
 			raise(SIGSTOP);
 			execvp(argv[1], &argv[1]);
 			perror("execvp");
@@ -112,6 +125,11 @@ int main(int argc, char *argv[]) {
 			kill(child_pid, SIGCONT);
 		}
 	}
+
+	void *vdso = dlopen("linux-vdso.so.1", RTLD_LAZY | RTLD_NOLOAD);
+	VDSO_gettimeofday = (unsigned long)dlsym(vdso, "__vdso_gettimeofday") & 0xfff;
+	VDSO_time = (unsigned long)dlsym(vdso, "__vdso_time") & 0xfff;
+	VDSO_getcpu = (unsigned long)dlsym(vdso, "__vdso_getcpu") & 0xfff;
 
 	while ((pid = waitpid(-1, &wstatus, 0)) != -1) {
 		if (WIFSTOPPED(wstatus)) {
