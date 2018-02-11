@@ -119,9 +119,24 @@ int main(int argc, char *argv[]) {
 		} else {
 			if (ptrace(PTRACE_SEIZE, child_pid, 0, PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK | PTRACE_O_TRACECLONE) != 0) {
 				perror("PTRACE_SEIZE");
+				if (errno == EPERM) {
+					fprintf(stderr, "Error: no kernel vsyscall support and ptrace is disabled.\n");
+					fprintf(stderr, "Your kernel does not provide vsyscall emulation, and we cannot\n");
+					fprintf(stderr, "work around this because ptrace is prohibited inside this container.\n");
+					fprintf(stderr, "Either permit ptrace for this container (e.g., for Docker, use\n");
+					fprintf(stderr, "docker run --security-opt=seccomp:unconfined) or boot your kernel\n");
+					fprintf(stderr, "with vsyscall=emulate.\n");
+				}
 				kill(child_pid, SIGKILL);
 				return 1;
 			}
+			fprintf(stderr, "Warning: using ptrace-based vsyscall emulation.\n");
+			fprintf(stderr, "This container contains old binaries which require the use of the legacy\n");
+			fprintf(stderr, "'vsyscall' feature of the Linux kernel, and your kernel does not provide\n");
+			fprintf(stderr, "vsyscall emulation. We will attempt to emulate vsyscalls ourselves using\n");
+			fprintf(stderr, "ptrace, but performance may suffer and other tools that use ptrace (e.g.,\n");
+			fprintf(stderr, "gdb and strace) will not work.\n");
+			fprintf(stderr, "To avoid this emulation, please boot your kernel with vsyscall=emulate.\n");
 			kill(child_pid, SIGCONT);
 		}
 	}
