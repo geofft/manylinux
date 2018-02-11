@@ -106,6 +106,7 @@ int main(int argc, char *argv[]) {
 		} else {
 			if (ptrace(PTRACE_SEIZE, child_pid, 0, PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK | PTRACE_O_TRACECLONE) != 0) {
 				perror("PTRACE_SEIZE");
+				kill(child_pid, SIGKILL);
 				return 1;
 			}
 			kill(child_pid, SIGCONT);
